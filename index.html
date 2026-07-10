@@ -45,9 +45,18 @@
     ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
     log('onnxruntime-web loaded');
 
+    const MODEL_URL = 'https://github.com/ys-dirard/rf-detr-keypoint-web/releases/download/v1.0.0/rfdetr-keypoint-preview.onnx';
+    log('downloading model (147MB)...');
     const loadStart = performance.now();
-    const session = await ort.InferenceSession.create('./model.onnx', { executionProviders: ['webgpu'] });
-    log('session created (webgpu), ms=' + (performance.now() - loadStart).toFixed(1));
+    let session;
+    try {
+      session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ['webgpu'] });
+      log('session created (webgpu), ms=' + (performance.now() - loadStart).toFixed(1));
+    } catch (e) {
+      log('webgpu unavailable, falling back to wasm: ' + (e && e.message ? e.message : String(e)));
+      session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ['wasm'] });
+      log('session created (wasm), ms=' + (performance.now() - loadStart).toFixed(1));
+    }
 
     const img = document.getElementById('img');
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; if (img.complete) res(); });
