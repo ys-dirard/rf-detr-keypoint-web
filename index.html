@@ -13,10 +13,11 @@
     <label><input type="radio" name="source" value="image" checked> デモ画像</label>
     <label><input type="radio" name="source" value="webcam"> Webカメラ</label>
     <label style="margin-left:1em"><input type="checkbox" id="toggleEllipse" checked> 不確実性の楕円を表示(オフでポイントのみ)</label>
+    <label style="margin-left:1em; display:none" id="cameraSelectWrap">カメラ: <select id="cameraSelect"></select></label>
   </div>
   <canvas id="canvas" width="576" height="576"></canvas>
   <img id="img" src="./test_person.jpg" style="display:none" crossorigin="anonymous">
-  <video id="video" autoplay playsinline muted style="display:none" width="576" height="576"></video>
+  <video id="video" autoplay playsinline muted style="position:absolute; left:-9999px; top:-9999px" width="576" height="576"></video>
 </div>
 <div id="status">モデルファイルを選択してください。</div>
 <script type="module">
@@ -194,12 +195,41 @@
     let stream = null;
     let webcamLoopPromise = Promise.resolve();
 
+    const cameraSelect = document.getElementById('cameraSelect');
+    const cameraSelectWrap = document.getElementById('cameraSelectWrap');
+
+    // ノートPCではWindows Hello用の赤外線(IR)カメラが別デバイスとして存在することが多く、
+    // それを選んでしまうと映像が真っ黒になる。facingMode: 'user'で通常のカメラを優先しつつ、
+    // 複数デバイスがあれば選び直せるようにする。
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+      cams.forEach((c, i) => {
+        const opt = document.createElement('option');
+        opt.value = c.deviceId;
+        opt.textContent = c.label || ('カメラ ' + (i + 1));
+        cameraSelect.appendChild(opt);
+      });
+      cameraSelectWrap.style.display = cams.length > 1 ? '' : 'none';
+    }
+
     async function startWebcam() {
       webcamActive = true;
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: W, height: H } });
+      const deviceId = cameraSelect.value || undefined;
+      const videoConstraints = deviceId
+        ? { deviceId: { exact: deviceId }, width: W, height: H }
+        : { facingMode: 'user', width: W, height: H };
+      stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
       video.srcObject = stream;
-      await new Promise(res => { video.onloadedmetadata = res; });
+      // loadedmetadataは寸法が分かった時点で発火し、実際の映像フレームがまだ来ていないことがある。
+      // 最初のフレームが描画可能になるloadeddataまで待ち、黒画面のまま推論するのを避ける。
+      await new Promise((res) => { video.onloadeddata = res; });
+      // autoplay属性だけでは再生が始まらない場合がある(video.pausedがtrueのまま)。
+      // 明示的にplay()を呼び、実際に再生中であることを保証する。
+      await video.play();
       log('webcam stream started: ' + video.videoWidth + 'x' + video.videoHeight);
+      await listCameras(); // 権限付与後はlabelが取得できるようになるため、許可後に再取得する
       while (webcamActive) {
         await inferOnce(video);
         await new Promise((res) => setTimeout(res, 0)); // UIイベントに処理を戻す
@@ -233,6 +263,15 @@
         }
       });
     }
+
+    cameraSelect.addEventListener('change', async () => {
+      if (document.querySelector('input[name="source"][value="webcam"]').checked) {
+        await stopWebcam();
+        webcamLoopPromise = startWebcam().catch((e) => {
+          log('WEBCAM ERROR: ' + (e && e.message ? e.message : String(e)));
+        });
+      }
+    });
 
     await inferOnce(img); // ウォームアップを兼ねた初回推論(1回目はシェーダコンパイル待ちが入る)
     await inferOnce(img); // 定常状態の速度を見るための2回目
