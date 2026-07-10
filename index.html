@@ -2,15 +2,23 @@
 <html>
 <head><meta charset="utf-8"><title>RF-DETR keypoint + onnxruntime-web (WebGPU)</title></head>
 <body>
-<div>
-  <label><input type="radio" name="source" value="image" checked> デモ画像</label>
-  <label><input type="radio" name="source" value="webcam"> Webカメラ</label>
-  <label style="margin-left:1em"><input type="checkbox" id="toggleEllipse" checked> 不確実性の楕円を表示(オフでポイントのみ)</label>
+<div id="loadStep">
+  <p>1. モデルファイル(約147MB、ONNX形式)をダウンロードしてください。</p>
+  <p><a href="https://github.com/ys-dirard/rf-detr-keypoint-web/releases/download/v1.0.0/rfdetr-keypoint-preview.onnx" download>rfdetr-keypoint-preview.onnx をダウンロード</a></p>
+  <p>2. ダウンロードしたファイルを選択してください(ブラウザだけで読み込み、どこにも送信しません)。</p>
+  <p><input type="file" id="modelFile" accept=".onnx"></p>
 </div>
-<canvas id="canvas" width="576" height="576"></canvas>
-<img id="img" src="./test_person.jpg" style="display:none" crossorigin="anonymous">
-<video id="video" autoplay playsinline muted style="display:none" width="576" height="576"></video>
-<div id="status">loading...</div>
+<div id="app" style="display:none">
+  <div>
+    <label><input type="radio" name="source" value="image" checked> デモ画像</label>
+    <label><input type="radio" name="source" value="webcam"> Webカメラ</label>
+    <label style="margin-left:1em"><input type="checkbox" id="toggleEllipse" checked> 不確実性の楕円を表示(オフでポイントのみ)</label>
+  </div>
+  <canvas id="canvas" width="576" height="576"></canvas>
+  <img id="img" src="./test_person.jpg" style="display:none" crossorigin="anonymous">
+  <video id="video" autoplay playsinline muted style="display:none" width="576" height="576"></video>
+</div>
+<div id="status">モデルファイルを選択してください。</div>
 <script type="module">
   const statusEl = document.getElementById('status');
   function log(msg) {
@@ -40,23 +48,38 @@
     ctx.restore();
   }
 
-  try {
-    const ort = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.mjs');
-    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
-    log('onnxruntime-web loaded');
+  const ort = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.mjs');
+  ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 
-    const MODEL_URL = 'https://github.com/ys-dirard/rf-detr-keypoint-web/releases/download/v1.0.0/rfdetr-keypoint-preview.onnx';
-    log('downloading model (147MB)...');
+  const modelFileInput = document.getElementById('modelFile');
+  modelFileInput.addEventListener('change', async () => {
+    const file = modelFileInput.files[0];
+    if (!file) return;
+    try {
+      await runApp(file);
+    } catch (e) {
+      log('ERROR: ' + (e && e.message ? e.message : String(e)));
+      log('STACK: ' + (e && e.stack ? e.stack : 'no stack'));
+    }
+  });
+
+  async function runApp(file) {
+    log('loaded onnxruntime-web, reading selected file (' + (file.size / 1e6).toFixed(1) + 'MB)...');
+    const modelBytes = new Uint8Array(await file.arrayBuffer());
+
     const loadStart = performance.now();
     let session;
     try {
-      session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ['webgpu'] });
+      session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['webgpu'] });
       log('session created (webgpu), ms=' + (performance.now() - loadStart).toFixed(1));
     } catch (e) {
       log('webgpu unavailable, falling back to wasm: ' + (e && e.message ? e.message : String(e)));
-      session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ['wasm'] });
+      session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] });
       log('session created (wasm), ms=' + (performance.now() - loadStart).toFixed(1));
     }
+
+    document.getElementById('loadStep').style.display = 'none';
+    document.getElementById('app').style.display = '';
 
     const img = document.getElementById('img');
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; if (img.complete) res(); });
@@ -214,9 +237,6 @@
     await inferOnce(img); // ウォームアップを兼ねた初回推論(1回目はシェーダコンパイル待ちが入る)
     await inferOnce(img); // 定常状態の速度を見るための2回目
     log('DONE');
-  } catch (e) {
-    log('ERROR: ' + (e && e.message ? e.message : String(e)));
-    log('STACK: ' + (e && e.stack ? e.stack : 'no stack'));
   }
 </script>
 </body>
