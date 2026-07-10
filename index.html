@@ -88,17 +88,25 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const W = 576, H = 576;
+
+    // 表示用canvasはredraw()以外では絶対に描かない。推論中(session.run()の待ち時間)に
+    // キーポイントの無い生フレームだけが表示され続ける「ちらつき」を防ぐため、
+    // 推論に使うフレームはこの非表示canvasに凍結してから読む。
+    const captureCanvas = document.createElement('canvas');
+    captureCanvas.width = W;
+    captureCanvas.height = H;
+    const captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true });
     const numSlots = 34, numCh = 8;
     const classOffset = 1 * 17; // schema [0,17]: slot0=背景, slot1=person
     const sigmoid = x => 1 / (1 + Math.exp(-x));
     const THRESH = 0.5;
 
     let decoded = [];
-    let lastSource = img;
+    let lastFrame = img;
 
     async function inferOnce(sourceEl) {
-      ctx.drawImage(sourceEl, 0, 0, W, H);
-      const { data } = ctx.getImageData(0, 0, W, H);
+      captureCtx.drawImage(sourceEl, 0, 0, W, H);
+      const { data } = captureCtx.getImageData(0, 0, W, H);
 
       // HWC uint8 -> NCHW float32 [0,1](ONNXの入力レイアウト)
       const chw = new Float32Array(3 * W * H);
@@ -158,14 +166,14 @@
         return { q, score, box, points };
       });
 
-      lastSource = sourceEl;
+      lastFrame = captureCanvas;
       redraw(toggle.checked);
       log('infer ok, elapsed ms=' + elapsed.toFixed(1) + ', detections=' + decoded.length);
     }
 
     function redraw(showEllipses) {
       ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(lastSource, 0, 0, W, H);
+      ctx.drawImage(lastFrame, 0, 0, W, H);
       for (const { box, points } of decoded) {
         ctx.strokeStyle = 'lime';
         ctx.lineWidth = 2;
