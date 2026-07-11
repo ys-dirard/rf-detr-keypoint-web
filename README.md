@@ -35,6 +35,33 @@ python -m http.server 8000
 
 WebGPUが有効かどうかは、Chrome/Edgeのアドレスバーで`chrome://gpu`を開き、`WebGPU`の項目が`Hardware accelerated`になっているかで確認できます。`Software only`の場合はGPUを積んだ実機でもCPU(Wasm)にフォールバックし、1推論あたり数秒かかります。
 
+## モデルを自分でエクスポートする
+
+配布しているONNXファイルは、`rfdetr`パッケージの`export()`をPython 3.10以上の環境でそのまま実行すれば再現できます。TFLiteへの変換は経由しないため、TFLite変換専用の`tflite` extra(Python 3.12限定)は不要です。
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate  # Windowsの場合。macOS/Linuxは source .venv/bin/activate
+pip install "rfdetr[onnx]"
+```
+
+```python
+from rfdetr import RFDETRKeypointPreview
+
+# num_classes=1 を指定してもモデル初期化時に
+# 「重みが部分的にしかロードされていない」という警告が出るが、無視してよい
+# (rfdetr側の既知の警告で、可視化結果には影響しない)
+model = RFDETRKeypointPreview(num_classes=1)
+
+# 初回はチェックポイント(約156MB)が自動ダウンロードされる
+path = model.export(output_dir="export_out", format="onnx")
+print(path)  # export_out/rfdetr-keypoint-preview.onnx
+```
+
+生成される`rfdetr-keypoint-preview.onnx`は、入出力の形状・値ともに配布中のファイルと同等です(実際に本READMEの検証時点でも、`test_person.jpg`に対する`dets`の1件目の値が配布中のファイルと一致することを確認しています)。ファイルサイズは、インストールされる`onnx`ライブラリのバージョンによって多少前後します(検証時点で約147〜163MB)。
+
+エクスポートしたファイルは、そのまま`index.html`のファイル選択(`<input type="file">`)から読み込んで使えます。
+
 ## 技術構成
 
 ```
